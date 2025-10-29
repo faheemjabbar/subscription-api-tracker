@@ -9,18 +9,34 @@ export const createSubscription = async (req, res, next) => {
       user: req.user._id,
     });
 
-    const { workflowRunId } = await workflowClient.trigger({
-      url: `${SERVER_URL}/api/v1/workflows/subscription/reminder`,
-      body: {
-        subscriptionId: subscription.id,
-      },
-      headers: {
-        'content-type': 'application/json',
-      },
-      retries: 0,
-    })
+    // Try to trigger workflow, but don't fail if it doesn't work
+    let workflowRunId = null;
+    try {
+      const result = await workflowClient.trigger({
+        url: `${SERVER_URL}/api/v1/workflows/subscription/reminder`,
+        body: {
+          subscriptionId: subscription._id.toString(),
+        },
+        headers: {
+          'content-type': 'application/json',
+        },
+        retries: 0,
+      });
+      workflowRunId = result.workflowRunId;
+      console.log('✅ Workflow triggered successfully:', workflowRunId);
+    } catch (workflowError) {
+      console.error('⚠️  Workflow trigger failed (subscription still created):', workflowError.message);
+      // Don't throw - subscription is still created successfully
+    }
 
-    res.status(201).json({ success: true, data: { subscription, workflowRunId } });
+    res.status(201).json({ 
+      success: true, 
+      data: { 
+        subscription, 
+        workflowRunId,
+        workflowStatus: workflowRunId ? 'scheduled' : 'not_scheduled'
+      } 
+    });
   } catch (e) {
     next(e);
   }
@@ -29,9 +45,9 @@ export const createSubscription = async (req, res, next) => {
 export const getUserSubscriptions = async (req, res, next) => {
   try {
     // Check if the user is the same as the one in the token
-    if(req.user.id !== req.params.id) {
-      const error = new Error('You are not the owner of this account');
-      error.status = 401;
+    if(req.user._id.toString() !== req.params.id) {
+      const error = new Error('You are not authorized to view these subscriptions');
+      error.statusCode = 403;
       throw error;
     }
 
